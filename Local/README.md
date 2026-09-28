@@ -1,64 +1,59 @@
-#  Run GreenOps Locally
+# Run GreenOps Locally
 
-This folder contains everything you need to run the GreenOps agent on your own machine.
+This folder contains the local GreenOps execution mode. It reads Gemini credentials from the runtime environment and **never prompts for or stores a key**.
 
 ## Prerequisites
 
-1.  **Python 3.10+** installed.
-2.  **Gemini API Key** (Get it from [Google AI Studio](https://aistudio.google.com/apikey)).
+1. Python 3.10+.
+2. Dependencies installed from the repository root:
 
----
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-##  Quick Start Guide
+3. A Gemini API key created in the appropriate Google AI Studio project. Enter the key only in your approved secret manager or local environment—not in source files, a `.env` committed to Git, a terminal transcript, or a pull request.
 
-### 1. Install Dependencies
-Open your terminal in this folder and run:
+## Secure quick start
 
-```bash
-pip install -r ../requirements.txt
-```
-
-### 2. ⚠️ CRITICAL: Upgrade Libraries
-To avoid version conflicts, you **MUST** upgrade the Google AI library:
+From the repository root:
 
 ```bash
-pip install --upgrade google-generativeai
-pip install --upgrade pip
+# macOS/Linux
+export GEMINI_API_KEY="<stored-in-your-shell-or-secret-manager>"
+export GREENOPS_GEMINI_MODEL="gemini-2.5-flash"  # optional; use a model enabled for your project
+python Local/greenops_local.py
 ```
 
-*(If you skip this, you might get a `protobuf` or `AttributeError`!)*
-
-### 3. Set Your API Key
-**Windows (PowerShell):**
 ```powershell
-$env:GOOGLE_API_KEY="your_actual_api_key_here"
+# Windows PowerShell
+$env:GEMINI_API_KEY="<stored-in-your-shell-or-secret-manager>"
+$env:GREENOPS_GEMINI_MODEL="gemini-2.5-flash"   # optional
+python Local/greenops_local.py
 ```
-**Mac/Linux:**
+
+`GOOGLE_API_KEY` remains supported only for backward compatibility. When both are set, `GEMINI_API_KEY` takes precedence.
+
+## Validate configuration behavior without a live request
+
 ```bash
-export GOOGLE_API_KEY="your_actual_api_key_here"
+python -m unittest discover -s tests -v
 ```
 
-### 4. Run the Agent
-```bash
-python greenops_local.py
-```
+The tests check key precedence and malformed configuration without contacting Gemini or exposing a credential.
 
----
-
-##  What to Expect
+## What to expect
 
 The script will:
-1.  **Connect** to the real UK National Grid API.
-2.  **Simulate** 3 scenarios (Microservice, Big Data, Security Patch).
-3.  **Print** the agent's reasoning and decisions in real-time.
 
-**Example Output:**
-> 🤖 AGENT: The current carbon intensity is 68g (Green). Deploying immediately! 
+1. Connect to the UK National Grid Carbon Intensity API.
+2. Run three local scenarios (microservice, data migration, and security patch).
+3. Use Gemini to reason about scheduling only after a key is available in the runtime environment.
 
----
+## Troubleshooting
 
-## ❓ Troubleshooting
-
-*   **`AttributeError: whichOneof`**: Run `pip install --upgrade google-generativeai`.
-*   **`429 Resource Exhausted`**: You hit the free tier limit. Wait 60 seconds.
-*   **`Module not found`**: Ensure you are in the `Local/` folder or pointing to the right `requirements.txt`.
+| Symptom | Action |
+|---|---|
+| `Gemini configuration error` | Confirm the secret store/runtime provides `GEMINI_API_KEY` and that it has no leading, trailing, or embedded whitespace. |
+| Model request fails | Set `GREENOPS_GEMINI_MODEL` to a model enabled for the selected AI Studio project. |
+| `429 Resource Exhausted` | Authentication worked; wait for quota availability or use a project with appropriate capacity. |
+| Protobuf / SDK error | Upgrade the packages declared in `requirements.txt` in the local virtual environment. |

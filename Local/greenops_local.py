@@ -11,18 +11,18 @@ from typing import Dict, List, Optional
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
 from google.ai.generativelanguage import Part, FunctionResponse
+from gemini_config import GeminiConfigurationError, get_gemini_settings
+from deterministic_controls import evaluate_carbon_gate
 
 # --- Configuration ---
 print("🌿 GreenOps Enterprise - Local Execution Mode")
-api_key = os.environ.get("GOOGLE_API_KEY")
-if not api_key:
-    api_key = input("🔑 Please enter your Google Gemini API Key: ").strip()
-    if not api_key:
-        print("❌ API Key is required. Exiting.")
-        exit(1)
+try:
+    gemini_settings = get_gemini_settings()
+except GeminiConfigurationError as exc:
+    raise SystemExit(f"❌ Gemini configuration error: {exc}") from None
 
-genai.configure(api_key=api_key)
-print("✅ API Configured.")
+genai.configure(api_key=gemini_settings.api_key)
+print(f"✅ Gemini API configured with model preference: {gemini_settings.model}")
 
 # --- Core Logic ---
 class CarbonIntensityFetcher:
@@ -74,6 +74,12 @@ task_manager = DevOpsTaskManager()
 # --- Tools ---
 def get_carbon_intensity(): return carbon_fetcher.get_current_intensity()
 def get_carbon_forecast(hours: int = 24): return {"forecast": carbon_fetcher.get_forecast(hours)}
+def get_carbon_gate_decision():
+    """Return a deterministic readout; the AI agent cannot override or execute it."""
+    carbon_data = carbon_fetcher.get_current_intensity()
+    return evaluate_carbon_gate(
+        index=carbon_data.get("index"), intensity=carbon_data.get("intensity")
+    ).as_dict()
 def find_greenest_window(hours: int = 24, duration: int = 2):
     # Safety Cast 
     hours = int(hours)
@@ -97,30 +103,32 @@ def deploy_task(task_name: str, scheduled_for: str = None):
 def get_deployment_stats():
     return {"total_jobs": len(task_manager.tasks), "status_breakdown": [f"{t['name']}: {t['status']}" for t in task_manager.tasks]}
 
-tools_list = [get_carbon_intensity, get_carbon_forecast, find_greenest_window, deploy_task, get_deployment_stats]
+tools_list = [get_carbon_intensity, get_carbon_forecast, get_carbon_gate_decision, find_greenest_window, get_deployment_stats]
 
 # --- Agent Setup ---
-def get_available_model(tools, system_instruction):
+def get_available_model(tools, system_instruction, preferred_model):
     print("🔍 Finding best Gemini model...")
     try:
         for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods and 'flash' in m.name:
+            normalized_name = m.name.removeprefix("models/")
+            if 'generateContent' in m.supported_generation_methods and normalized_name == preferred_model:
                 return genai.GenerativeModel(model_name=m.name, tools=tools, system_instruction=system_instruction)
-        return genai.GenerativeModel(model_name='gemini-1.5-flash', tools=tools, system_instruction=system_instruction)
-    except:
-        return genai.GenerativeModel(model_name='gemini-1.5-flash', tools=tools, system_instruction=system_instruction)
+        return genai.GenerativeModel(model_name=preferred_model, tools=tools, system_instruction=system_instruction)
+    except Exception as exc:
+        print(f"⚠️ Model discovery unavailable; using configured model preference. ({type(exc).__name__})")
+        return genai.GenerativeModel(model_name=preferred_model, tools=tools, system_instruction=system_instruction)
 
 system_instruction = """
 You are GreenOps, an Enterprise Carbon-Aware DevOps Assistant.
 MISSION: Reduce carbon footprint by optimizing WHEN tasks run.
 RULES:
 1. ALWAYS check `get_carbon_intensity`.
-2. IF Carbon < 200g: Deploy Immediately.
-3. IF Carbon > 200g: Find greenest window, then Schedule.
-4. Explain reasoning using data.
+2. ALWAYS obtain `get_carbon_gate_decision` before recommending a release window.
+3. Treat the deterministic gate as the source of truth; do not infer, change, or bypass its result.
+4. You may explain a recommendation using data, but you cannot execute deployments, create overrides, or assert a human approval.
 """
 
-model = get_available_model(tools_list, system_instruction)
+model = get_available_model(tools_list, system_instruction, gemini_settings.model)
 chat = model.start_chat(enable_automatic_function_calling=False)
 
 def send_message_safe(message):
@@ -147,8 +155,8 @@ def run_turn(user_message):
             result = {}
             if fname == "get_carbon_intensity": result = get_carbon_intensity()
             elif fname == "get_carbon_forecast": result = get_carbon_forecast(**fargs)
+            elif fname == "get_carbon_gate_decision": result = get_carbon_gate_decision()
             elif fname == "find_greenest_window": result = find_greenest_window(**fargs)
-            elif fname == "deploy_task": result = deploy_task(**fargs)
             elif fname == "get_deployment_stats": result = get_deployment_stats()
             
             response = send_message_safe(Part(function_response=FunctionResponse(name=fname, response=result)))
