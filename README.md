@@ -4,7 +4,7 @@
 
 # 🌿 GreenOps Enterprise
 
-[![Gemini 1.5 Flash](https://img.shields.io/badge/AI-Gemini%201.5%20Flash-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
+[![Gemini API](https://img.shields.io/badge/AI-Gemini%20API-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
 [![Carbon API](https://img.shields.io/badge/Data-UK%20National%20Grid-00b894?style=for-the-badge&logo=leaf&logoColor=white)](https://carbonintensity.org.uk/)
 [![Python](https://img.shields.io/badge/Code-Python%203.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
@@ -17,7 +17,7 @@
 **GreenOps** is an autonomous AI agent that optimizes cloud deployments based on real-time carbon intensity. Instead of deploying blindly, it checks the grid status and intelligently schedules workloads for "green windows"—reducing carbon emissions by up to **40%**.
 
 ### **Powered By**
-*    **Google Gemini 1.5 Flash**: The reasoning engine that decides *when* to deploy.
+*    **Google Gemini API**: The reasoning engine that decides *when* to deploy. Model selection is explicit runtime configuration, not a committed secret or hard-coded project setting.
 *    **UK National Grid Carbon Intensity API**: Real-time energy generation data (Wind, Solar, Gas, Coal).
 
 
@@ -26,7 +26,20 @@
 
 A dedicated local execution mode for testing on your laptop is here!!
 
- **[Click Here for Local Setup Guide](Local/README_LOCAL.md)**
+ **[Click Here for Local Setup Guide](Local/README.md)**
+
+## Secure Gemini Configuration
+
+1. Copy [`.env.example`](.env.example) for local reference only; never commit a real `.env` or paste a key into a notebook, shell transcript, issue, PR, or screenshot.
+2. Provide `GEMINI_API_KEY` through the approved secret manager or runtime environment. `GOOGLE_API_KEY` is supported only as a backwards-compatible fallback.
+3. Set `GREENOPS_GEMINI_MODEL` only if you need to override the template's model preference. The selected model must be enabled for the key's Google AI Studio project.
+4. Run `python -m unittest discover -s tests -v` before enabling live requests.
+
+The [Gemini integration handoff for Caleb McCombs](docs/gemini-handoff-for-caleb-mccombs.md) records the security, review, and collaboration boundaries for this change. It does not grant repository access or imply an affiliation.
+
+## Deterministic Release Controls
+
+GreenOps uses Gemini for explanations and recommendations, not for approval or execution authority. The repository's [deterministic systems check](docs/deterministic-systems-check.md) defines a fail-closed carbon gate, controlled emergency overrides, and the required human review evidence. The scheduled GitHub workflow validates those invariants before it permits the test matrix to run.
 
 
 ---
@@ -75,7 +88,7 @@ GreenOps acts as a "Sustainability Gatekeeper":
 ## Acknowledgments
 Built for the **Google AI Agents Hackathon** (November 2025).
 
-*   **LLM**: Gemini 1.5 Flash
+*   **LLM**: Gemini API (runtime-selected model)
 *   **Data**: Carbon Intensity API (National Grid ESO)
 
 

@@ -1,0 +1,124 @@
+name: Carbon-Aware Pipeline Runner
+
+on:
+  schedule:
+    # Rule-based gate for repository batch work; GitHub Actions may delay scheduled jobs.
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      override_carbon_gate:
+        description: "Emergency-only override of the carbon gate"
+        required: true
+        default: false
+        type: boolean
+      emergency_justification:
+        description: "Human-written emergency justification (20+ characters when overriding)"
+        required: false
+        default: ""
+        type: string
+      systems_check_attestation:
+        description: "Set to reviewed only after an independent systems check"
+        required: true
+        default: not-reviewed
+        type: choice
+        options:
+          - not-reviewed
+          - reviewed
+      systems_check_reference:
+        description: "Issue, PR, or change-record reference for the systems check"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: carbon-aware-pipeline
+  cancel-in-progress: false
+
+jobs:
+  deterministic-systems-check:
+    name: Validate deterministic control invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Validate deterministic controls
+        run: python3 tools/validate_deterministic_controls.py
+      - name: Run control tests
+        run: python3 -m unittest discover -s tests -v
+
+  carbon-gate:
+    name: Check Regional Grid Carbon Intensity
+    needs: deterministic-systems-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_run: ${{ steps.check_grid.outputs.should_run }}
+      intensity: ${{ steps.check_grid.outputs.intensity }}
+      decision_reason: ${{ steps.check_grid.outputs.decision_reason }}
+    steps:
+      - name: Evaluate deterministic carbon gate
+        id: check_grid
+        shell: bash
+        env:
+          OVERRIDE_CARBON_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.override_carbon_gate || 'false' }}
+          EMERGENCY_JUSTIFICATION: ${{ github.event_name == 'workflow_dispatch' && inputs.emergency_justification || '' }}
+          SYSTEMS_CHECK_ATTESTATION: ${{ github.event_name == 'workflow_dispatch' && inputs.systems_check_attestation || 'not-reviewed' }}
+          SYSTEMS_CHECK_REFERENCE: ${{ github.event_name == 'workflow_dispatch' && inputs.systems_check_reference || '' }}
+        run: |
+          set -euo pipefail
+          printf 'should_run=false\n' >> "$GITHUB_OUTPUT"
+          printf 'intensity=unavailable\n' >> "$GITHUB_OUTPUT"
+          printf 'decision_reason=not_evaluated\n' >> "$GITHUB_OUTPUT"
+
+          if [ "$OVERRIDE_CARBON_GATE" = "true" ]; then
+            if [ "$SYSTEMS_CHECK_ATTESTATION" != "reviewed" ]; then
+              echo "Emergency override rejected: an independent systems-check attestation is required." >&2
+              exit 1
+            fi
+            if [ "${#EMERGENCY_JUSTIFICATION}" -lt 20 ] || [ "${#SYSTEMS_CHECK_REFERENCE}" -lt 3 ]; then
+              echo "Emergency override rejected: add a specific justification and a systems-check reference." >&2
+              exit 1
+            fi
+            printf 'should_run=true\n' >> "$GITHUB_OUTPUT"
+            printf 'decision_reason=emergency_override_authorized\n' >> "$GITHUB_OUTPUT"
+            echo "Emergency override accepted with recorded human attestation."
+            exit 0
+          fi
+
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 1 --connect-timeout 10 --max-time 20 \
+            'https://api.carbonintensity.org.uk/intensity')"
+          index="$(jq -er '.data[0].intensity.index | strings' <<< "$response")"
+          intensity="$(jq -er '(.data[0].intensity.actual // .data[0].intensity.forecast) | numbers' <<< "$response")"
+
+          printf 'intensity=%s\n' "$intensity" >> "$GITHUB_OUTPUT"
+          case "$index" in
+            "very low"|"low")
+              printf 'should_run=true\n' >> "$GITHUB_OUTPUT"
+              printf 'decision_reason=clean_grid_index\n' >> "$GITHUB_OUTPUT"
+              echo "Grid is clean ($index); deterministic gate permits workload."
+              ;;
+            *)
+              printf 'decision_reason=carbon_index_not_clean\n' >> "$GITHUB_OUTPUT"
+              echo "Grid is not clean ($index); deterministic gate postpones workload."
+              ;;
+          esac
+
+  heavy-compute:
+    name: Execute Test Matrix
+    needs: carbon-gate
+    if: needs.carbon-gate.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Record deterministic gate decision
+        run: |
+          echo "Executing test matrix at carbon intensity: ${{ needs.carbon-gate.outputs.intensity }} gCO2/kWh"
+          echo "Decision reason: ${{ needs.carbon-gate.outputs.decision_reason }}"
+      - name: Execute test matrix
+        run: python3 -m unittest discover -s tests -v

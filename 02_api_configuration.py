@@ -3,14 +3,16 @@ from kaggle_secrets import UserSecretsClient
 
 try:
     user_secrets = UserSecretsClient()
-    # Ensure your Secret is named 'GEMINI_API_KEY' or 'GOOGLE_API_KEY'
-    # try to check for both to be safe
+    # Prefer GEMINI_API_KEY. GOOGLE_API_KEY remains a backwards-compatible fallback.
     try:
         api_key = user_secrets.get_secret("GEMINI_API_KEY")
     except:
         api_key = user_secrets.get_secret("GOOGLE_API_KEY")
-        
+
+    if not api_key or api_key != api_key.strip() or any(char.isspace() for char in api_key):
+        raise ValueError("Gemini secret is missing or malformed")
+
     genai.configure(api_key=api_key)
     print("✅ Gemini API Configured Successfully.")
-except Exception as e:
-    print(f"❌ Error: Could not retrieve API Key. Check Add-ons -> Secrets. Error: {e}")
+except Exception:
+    print("❌ Gemini was not configured. Add GEMINI_API_KEY in the notebook secret manager and retry.")
